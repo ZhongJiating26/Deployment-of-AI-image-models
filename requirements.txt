@@ -1,0 +1,31 @@
+# 应用级依赖模板：适用于 Python 3.14 Windows / FastAPI API 层。
+# 请先独立安装【已验证的 CUDA 版 PyTorch】与【支持 QwenImage21Pipeline 的 Diffusers 源码版本】。
+# 避免直接从默认 PyPI/镜像安装 torch 后覆盖 CUDA 构建，或拉取不支持 Turbo 的旧版 diffusers。
+# 已运行成功的主机建议先执行：python -m pip freeze > requirements.lock.txt
+# 再视部署需求审查并固定锁定版本。
+
+# HTTP / 配置 / 校验
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+pydantic>=2.10,<3
+pydantic-settings>=2.6,<3
+python-multipart>=0.0.20
+python-dotenv>=1,<2
+
+# Diffusers 运行所需的其他依赖
+transformers>=5.17.0
+accelerate>=1.0
+safetensors>=0.5
+pillow>=11.0
+huggingface-hub>=0.30
+
+# 用量与诊断（可选，但本模板建议安装）
+psutil>=6.0
+
+# OpenAI Python SDK（用于本地接口验收，不是服务端必需）
+openai>=2.0
+
+# 框架由 README 中的显式安装命令单独处理：
+# torch==2.11.0 (CUDA 12.8 官方索引)
+# torchvision==0.26.0 (如需；服务端并非必需)
+# diffusers（请固定已验证的源码 commit 或本地源码 ZIP）
