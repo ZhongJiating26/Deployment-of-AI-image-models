@@ -37,11 +37,12 @@ def validate_params(values, settings):
     except ValidationError as exc:
         raise APIError(422, "validation_error", "Invalid or missing request fields") from exc
     params.model = settings.model_name if params.model is None else params.model
-    params.size = settings.default_image_size if params.size is None else params.size
     fmt = settings.default_response_format if params.response_format is None else params.response_format
     if params.model not in settings.models:
         raise APIError(400, "unsupported_model", "Unsupported model")
-    if params.size not in settings.sizes:
+    if params.size is None:
+        params.size = settings.default_size_for(params.model)
+    if params.size not in settings.sizes_for(params.model):
         raise APIError(400, "unsupported_size", "Unsupported image size")
     if params.n != settings.max_images_per_request:
         raise APIError(400, "invalid_request", "Only n=1 is supported")

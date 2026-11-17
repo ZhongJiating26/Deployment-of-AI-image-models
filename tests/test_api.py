@@ -150,10 +150,13 @@ class APIContractTests(unittest.TestCase):
         self.assertEqual({model["id"] for model in listed},
                          {self.settings.model_name, QWEN_STANDARD, MINIMAX_ENTROPACK})
         for entry in listed:
-            self.assertEqual(set(entry["supported_sizes"]), {
+            sizes = {
                 "512x512", "768x768", "1024x1024", "1024x768", "768x1024",
                 "1152x768", "768x1152", "1024x576", "576x1024",
-            })
+            }
+            if entry["id"] == MINIMAX_ENTROPACK:
+                sizes |= {"2048x2048", "4096x4096", "6272x2688", "2688x6272"}
+            self.assertEqual(set(entry["supported_sizes"]), sizes)
             self.assertEqual(entry["default_size"], "1024x1024")
         self.settings.enable_2048 = True
         listed = self.client.get("/v1/models", headers=self.auth).json()["data"]
@@ -167,6 +170,29 @@ class APIContractTests(unittest.TestCase):
                 self.assertEqual(response.json()["meta"]["model"], model)
                 with Image.open(io.BytesIO(base64.b64decode(response.json()["data"][0]["b64_json"]))) as png:
                     self.assertEqual(png.size, expected_size)
+
+    def test_per_model_size_options_and_defaults(self):
+        self.settings.qwen_standard_path = self.temp
+        self.settings.minimax_entropack_path = self.temp
+        self.settings.qwen_standard_allowed_image_sizes = "768x1024"
+        self.settings.qwen_standard_default_image_size = "768x1024"
+        self.settings.minimax_allowed_image_sizes = "1024x576,4096x4096"
+        self.settings.minimax_default_image_size = "1024x576"
+        listed = {entry["id"]: entry for entry in self.client.get(
+            "/v1/models", headers=self.auth,
+        ).json()["data"]}
+        self.assertEqual(listed[QWEN_STANDARD]["supported_sizes"], ["768x1024"])
+        self.assertEqual(listed[MINIMAX_ENTROPACK]["supported_sizes"], ["1024x576", "4096x4096"])
+        self.error(self.generate(model=QWEN_STANDARD, size="4096x4096"), 400, "unsupported_size")
+        mini = self.generate(model=MINIMAX_ENTROPACK, size="4096x4096")
+        self.assertEqual(mini.status_code, 200, mini.text[:300])
+        for response, size in (
+            (self.generate(model=QWEN_STANDARD), (768, 1024)),
+            (self.edit({"prompt": "edit", "model": MINIMAX_ENTROPACK}), (1024, 576)),
+        ):
+            self.assertEqual(response.status_code, 200)
+            with Image.open(io.BytesIO(base64.b64decode(response.json()["data"][0]["b64_json"]))) as png:
+                self.assertEqual(png.size, size)
 
     def test_upload_validation(self):
         self.error(self.edit({"prompt": "edit", "mask": "unsupported"}), 400, "invalid_request")

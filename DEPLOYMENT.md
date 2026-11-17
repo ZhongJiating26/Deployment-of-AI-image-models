@@ -56,7 +56,8 @@ Invoke-RestMethod http://127.0.0.1:8000/ready
 ## 4. 配置行为与故障排查
 
 - `ENABLE_DOCS=true` 启用 `/docs` 和 `/openapi.json`。所有 `/v1` 请求携带 Bearer 密钥。使用 `CORS_ALLOWED_ORIGINS` 配置逗号分隔的浏览器来源。
-- 已部署的 `.env` 会覆盖程序默认尺寸。启用横竖图时，将新版 `.env.example` 的 `ALLOWED_IMAGE_SIZES` 一行合并进去并重启。也可以添加其他宽高均在 512 至 2048 且为 32 倍数的尺寸。开启 `ENABLE_2048` 后自动加入 2048×2048，并启用配置列表中任一边为 2048 的尺寸。请在目标机验证显存用量。
+- 已部署的 `.env` 会覆盖程序默认尺寸。启用横竖图时，将新版 `.env.example` 的 `ALLOWED_IMAGE_SIZES` 一行合并进去并重启。Qwen 的宽高均在 512 至 2048 且为 32 的倍数。开启 `ENABLE_2048` 为两个 Qwen 模型自动加入 2048×2048，并启用各自列表中任一边为 2048 的尺寸。
+- Turbo 使用 `ALLOWED_IMAGE_SIZES` 和 `DEFAULT_IMAGE_SIZE`。Qwen 标准版可用 `QWEN_STANDARD_ALLOWED_IMAGE_SIZES` 和 `QWEN_STANDARD_DEFAULT_IMAGE_SIZE` 覆盖。MiniMax 可用 `MINIMAX_ALLOWED_IMAGE_SIZES` 和 `MINIMAX_DEFAULT_IMAGE_SIZE` 覆盖。辅助模型未指定默认尺寸时沿用 Turbo 默认值。MiniMax 尺寸列表留空时，在 Turbo 的配置列表上加入 2048×2048、4096×4096、6272×2688 和 2688×6272。MiniMax 可配置宽高均为 512 至 8192 范围内的 32 的倍数，面积不超过 2000 万像素。请分别验证文生图和编辑的速度与显存用量。
 - `MODEL_LOCAL_FILES_ONLY=true`、`MAX_IMAGES_PER_REQUEST=1`、`MAX_CONCURRENT_INFERENCES=1`、`ENABLE_URL_RESPONSE=false` 和 `DEFAULT_RESPONSE_FORMAT=b64_json` 是当前服务约束。启动时校验配置值。
 - `MAX_QUEUE_LENGTH` 统计等待推理的请求。队满和超过 `QUEUE_WAIT_TIMEOUT_SECONDS` 均返回 429。取得推理槽后开始计算 `REQUEST_TIMEOUT_SECONDS`。超过该限时返回 504，线程继续持有推理槽直到本次任务结束。客户端及反向代理的响应超时宜覆盖排队与推理时限之和，并预留上传和传输时间。
 - `SAVE_OUTPUTS` 与 `SAVE_UPLOADS` 分别控制输出 PNG 和原始参考图是否写盘。按 UTC 日期和请求 ID 存放。启动和运行期间每小时依据 `OUTPUT_RETENTION_DAYS` 清理当前启用目录中的过期服务图像。
@@ -77,7 +78,7 @@ MINIMAX_PROFILE=int8
 QWEN_EDIT_REFERENCE_RESOLUTION=1024
 ```
 
-`QWEN_STANDARD_PATH` 指向包含 `model_index.json` 的 Diffusers 标准版根目录。标准版运行 40 步，Turbo 沿用本地权重的 8 步采样计划。`QWEN_EDIT_REFERENCE_RESOLUTION=1024` 将两个 Qwen 模型的参考图处理分辨率上限设为 1024，输出仍由请求的 `size` 决定。请求 2048 输出需要 `ENABLE_2048=true`。
+`QWEN_STANDARD_PATH` 指向包含 `model_index.json` 的 Diffusers 标准版根目录。标准版运行 40 步，Turbo 沿用本地权重的 8 步采样计划。`QWEN_EDIT_REFERENCE_RESOLUTION=1024` 将两个 Qwen 模型的参考图处理分辨率上限设为 1024，输出仍由请求的 `size` 决定。Qwen 请求单边 2048 的输出需要 `ENABLE_2048=true`。
 
 ### MiniMax 所需文件
 

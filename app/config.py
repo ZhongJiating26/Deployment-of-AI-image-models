@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 QWEN_STANDARD = "Qwen/Qwen-Image-2.1"
 MINIMAX_ENTROPACK = "DiffSynth-Studio/MiniMax-H3-Image-EntroPack"
 DEFAULT_SIZES = "512x512,768x768,1024x1024,1024x768,768x1024,1152x768,768x1152,1024x576,576x1024"
+MINIMAX_HIGH_RES_SIZES = "4096x4096,6272x2688,2688x6272"
 
 
 class Settings(BaseSettings):
@@ -34,6 +35,10 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = ""
     default_image_size: str = "1024x1024"
     allowed_image_sizes: str = DEFAULT_SIZES
+    qwen_standard_allowed_image_sizes: str = ""
+    qwen_standard_default_image_size: str = ""
+    minimax_allowed_image_sizes: str = ""
+    minimax_default_image_size: str = ""
     enable_2048: bool = False
     max_images_per_request: Literal[1] = 1
     max_concurrent_inferences: Literal[1] = 1
@@ -107,14 +112,30 @@ class Settings(BaseSettings):
 
     @property
     def sizes(self):
-        sizes = self.configured_sizes
-        if self.enable_2048:
-            return sizes | {"2048x2048"}
-        return {size for size in sizes if "2048" not in size.split("x")}
+        return self.sizes_for(self.model_name)
 
-    @property
-    def configured_sizes(self):
-        return {item.strip() for item in self.allowed_image_sizes.split(",")}
+    def sizes_for(self, model):
+        configured = self.configured_sizes_for(model)
+        if model == MINIMAX_ENTROPACK:
+            return configured
+        if self.enable_2048:
+            return configured | {"2048x2048"}
+        return {size for size in configured if "2048" not in size.split("x")}
+
+    def configured_sizes_for(self, model):
+        configured = self.allowed_image_sizes
+        if model == QWEN_STANDARD:
+            configured = self.qwen_standard_allowed_image_sizes or configured
+        elif model == MINIMAX_ENTROPACK:
+            configured = self.minimax_allowed_image_sizes or f"{configured},2048x2048,{MINIMAX_HIGH_RES_SIZES}"
+        return {item.strip() for item in configured.split(",")}
+
+    def default_size_for(self, model):
+        if model == QWEN_STANDARD:
+            return self.qwen_standard_default_image_size or self.default_image_size
+        if model == MINIMAX_ENTROPACK:
+            return self.minimax_default_image_size or self.default_image_size
+        return self.default_image_size
 
     @property
     def upload_formats(self):
@@ -128,13 +149,18 @@ class Settings(BaseSettings):
         if any(companions) or self.minimax_entropack_path:
             if not self.minimax_entropack_path or not all(companions):
                 raise ValueError("Set all three MiniMax local directories together")
-        for size in self.configured_sizes:
-            if not re.fullmatch(r"[1-9][0-9]{2,3}x[1-9][0-9]{2,3}", size):
-                raise ValueError("Use WIDTHxHEIGHT for each allowed image size")
-            if any(side < 512 or side > 2048 or side % 32 for side in map(int, size.split("x"))):
-                raise ValueError("Image sides must be multiples of 32 between 512 and 2048")
-        if self.default_image_size not in self.sizes:
-            raise ValueError("Default image size must be enabled")
+        for model in (self.model_name, QWEN_STANDARD, MINIMAX_ENTROPACK):
+            max_side = 8192 if model == MINIMAX_ENTROPACK else 2048
+            for size in self.configured_sizes_for(model):
+                if not re.fullmatch(r"[1-9][0-9]{2,3}x[1-9][0-9]{2,3}", size):
+                    raise ValueError(f"Use WIDTHxHEIGHT for each allowed image size for {model}")
+                width, height = map(int, size.split("x"))
+                if any(side < 512 or side > max_side or side % 32 for side in (width, height)):
+                    raise ValueError(f"Invalid image sides for {model}; use multiples of 32 from 512 to {max_side}")
+                if model == MINIMAX_ENTROPACK and width * height > 20_000_000:
+                    raise ValueError("MiniMax image size exceeds 20 million pixels")
+            if self.default_size_for(model) not in self.sizes_for(model):
+                raise ValueError(f"Default image size must be enabled for {model}")
         if not self.upload_formats <= {"PNG", "JPEG", "WEBP"}:
             raise ValueError("Invalid upload format configuration")
         return self
