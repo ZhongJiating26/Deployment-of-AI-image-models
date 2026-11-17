@@ -119,3 +119,18 @@ $miniDeps = @('diffsynth==2.2.2', 'cupy-cuda12x')
 ```
 
 启动时预加载 Turbo。请求其他模型时，服务在同一单卡队列内释放当前 Pipeline，再从本地加载目标模型。接着请求同一个模型会复用它。切换耗时计入 `REQUEST_TIMEOUT_SECONDS`，并写入 `model_loaded` 日志。若 MiniMax 文件缺失，对该模型的请求返回 503，缺件清单在 `minimax_assets_missing` 日志中。切回可用模型时服务会重新加载该模型。
+
+## 6. MiniMax H3 透明 PNG（可选）
+
+下载 [U²-Net ONNX 权重](https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx) 到目标机，保留文件名 `u2net.onnx`。在已有环境中按版本约束安装 CPU 版 ONNX Runtime。先查看安装计划，再执行实际安装。[Windows x64 / Python 3.14 wheel](https://pypi.org/project/onnxruntime/1.32.0/)
+
+```powershell
+& $py -m pip install --dry-run -c .\h3-existing-versions.txt 'onnxruntime==1.32.0'
+& $py -m pip install -c .\h3-existing-versions.txt 'onnxruntime==1.32.0'
+```
+
+配置 `MINIMAX_BACKGROUND_MODEL_PATH=E:\model\u2net.onnx`，重启服务。对 H3 文生图或编辑请求传 `background=transparent`。H3 完成生成或编辑后，服务在 CPU 上生成前景遮罩，合成与请求尺寸相同的 RGBA PNG。响应编码仍是 `b64_json`。透明模式是后处理，发丝和半透明物体的边缘效果取决于分割模型。
+
+```powershell
+& $py -m tests.smoke_live 'D:\AI\reference.png' --model 'DiffSynth-Studio/MiniMax-H3-Image-EntroPack' --transparent --results smoke-results\h3-transparent
+```

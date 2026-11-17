@@ -40,6 +40,11 @@ def validate_params(values, settings):
     fmt = settings.default_response_format if params.response_format is None else params.response_format
     if params.model not in settings.models:
         raise APIError(400, "unsupported_model", "Unsupported model")
+    if params.background is not None:
+        if params.model != MINIMAX_ENTROPACK or params.background != "transparent":
+            raise APIError(400, "invalid_request", "Only MiniMax supports background=transparent")
+        if settings.minimax_background_model_path is None:
+            raise APIError(400, "invalid_request", "Transparent background is not enabled")
     if params.size is None:
         params.size = settings.default_size_for(params.model)
     if params.size not in settings.sizes_for(params.model):

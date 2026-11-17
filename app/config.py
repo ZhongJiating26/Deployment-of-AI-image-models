@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     minimax_entropack_path: Path | None = None
     minimax_text_encoder_path: Path | None = None
     minimax_image_assets_path: Path | None = None
+    minimax_background_model_path: Path | None = None
     minimax_profile: Literal["int8", "7bit-int8", "3bpp"] = "int8"
     qwen_edit_reference_resolution: Literal[512, 768, 1024, 2048] | None = None
     model_local_files_only: Literal[True] = True
@@ -85,7 +86,8 @@ class Settings(BaseSettings):
         return value
 
     @field_validator("qwen_standard_path", "minimax_entropack_path", "minimax_text_encoder_path",
-                     "minimax_image_assets_path", "qwen_edit_reference_resolution", mode="before")
+                     "minimax_image_assets_path", "minimax_background_model_path",
+                     "qwen_edit_reference_resolution", mode="before")
     @classmethod
     def optional_settings(cls, value):
         return None if value == "" else value
@@ -96,7 +98,8 @@ class Settings(BaseSettings):
         return int(value) if isinstance(value, str) and value.isdecimal() else value
 
     @field_validator("model_path", "log_dir", "upload_dir", "output_dir", "qwen_standard_path",
-                     "minimax_entropack_path", "minimax_text_encoder_path", "minimax_image_assets_path")
+                     "minimax_entropack_path", "minimax_text_encoder_path", "minimax_image_assets_path",
+                     "minimax_background_model_path")
     @classmethod
     def resolve_path(cls, value):
         return (ROOT / value).resolve() if value is not None else None

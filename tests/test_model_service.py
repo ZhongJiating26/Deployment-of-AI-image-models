@@ -1,4 +1,5 @@
 import io
+import base64
 import json
 import sys
 import tempfile
@@ -34,7 +35,8 @@ class PipelineAdapterTests(unittest.TestCase):
         self.cuda = Mock()
         self.cuda.max_memory_allocated.return_value = 100
         self.torch = SimpleNamespace(cuda=self.cuda, bfloat16=object(), Generator=Mock(),
-                                     inference_mode=nullcontext, OutOfMemoryError=FakeOOM)
+                                     inference_mode=Mock(side_effect=nullcontext),
+                                     no_grad=Mock(side_effect=nullcontext), OutOfMemoryError=FakeOOM)
         with patch.dict("sys.modules", {
             "torch": self.torch,
             "diffusers": SimpleNamespace(QwenImage21Pipeline=SimpleNamespace(from_pretrained=self.loader)),
@@ -71,6 +73,22 @@ class PipelineAdapterTests(unittest.TestCase):
             self.service.render_image(self.params, None, 42, 2048, 2048)
             self.assertEqual(self.pipe.call_args.kwargs["output_resolution"], 2048)
 
+    def test_minimax_transparent_png(self):
+        self.params.model = MINIMAX_ENTROPACK
+        self.params.background = "transparent"
+        original = Image.new("RGB", (512, 512))
+        cutout = Image.new("RGBA", original.size, (0, 0, 0, 255))
+        cutout.putpixel((0, 0), (0, 0, 0, 0))
+        with patch("app.model_service.load_entropack", return_value=Mock(return_value=original)), patch(
+            "app.model_service.BackgroundRemover",
+        ) as remover:
+            remover.return_value.apply.return_value = cutout
+            result = self.service.run(self.params, None, 42, "req_test")
+            remover.return_value.apply.assert_called_once_with(original)
+        with Image.open(io.BytesIO(base64.b64decode(result.data[0].b64_json))) as png:
+            self.assertEqual(png.mode, "RGBA")
+            self.assertEqual(png.getchannel("A").getextrema(), (0, 255))
+
     def test_oom_recovery_and_unavailable_state(self):
         self.pipe.side_effect = FakeOOM("redacted")
         with self.assertRaises(APIError) as first:
@@ -106,6 +124,8 @@ class PipelineAdapterTests(unittest.TestCase):
             self.service.run(self.params, reference, 42, "req_test")
             minimax.assert_called_once_with(prompt="test", width=512, height=512,
                                             seed=42, edit_image=reference)
+            self.torch.no_grad.assert_called_once_with()
+            self.assertEqual(self.torch.inference_mode.call_count, 2)
             load_mini.assert_called_once()
             self.params.model = settings.model_name
             self.service.run(self.params, None, 42, "req_test")

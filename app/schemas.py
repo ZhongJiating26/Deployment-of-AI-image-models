@@ -9,6 +9,7 @@ class ImageRequest(BaseModel):
     n: int = 1
     seed: int | None = Field(None, ge=0, le=2**64 - 1)
     response_format: str | None = None
+    background: str | None = Field(None, description="H3 with a configured background model: transparent")
 
 
 class ImageData(BaseModel):

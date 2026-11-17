@@ -194,6 +194,15 @@ class APIContractTests(unittest.TestCase):
             with Image.open(io.BytesIO(base64.b64decode(response.json()["data"][0]["b64_json"]))) as png:
                 self.assertEqual(png.size, size)
 
+    def test_transparent_option_requires_minimax_and_configured_model(self):
+        self.settings.minimax_entropack_path = self.temp
+        options = {"model": MINIMAX_ENTROPACK, "background": "transparent"}
+        self.error(self.generate(background="transparent"), 400, "invalid_request")
+        self.error(self.generate(**options), 400, "invalid_request")
+        self.settings.minimax_background_model_path = self.temp / "u2net.onnx"
+        self.assertEqual(self.generate(**options).status_code, 200)
+        self.assertEqual(self.edit({"prompt": "edit", **options}).status_code, 200)
+
     def test_upload_validation(self):
         self.error(self.edit({"prompt": "edit", "mask": "unsupported"}), 400, "invalid_request")
         self.error(self.edit({"prompt": "edit"}, b"invalid"), 400, "invalid_request")

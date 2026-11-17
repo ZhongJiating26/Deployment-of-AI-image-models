@@ -10,6 +10,7 @@ from time import perf_counter, time
 
 from starlette.concurrency import run_in_threadpool
 
+from .background import BackgroundRemover
 from .config import MINIMAX_ENTROPACK, QWEN_STANDARD
 from .exceptions import APIError, log_exception
 from .image_utils import save_image
@@ -29,6 +30,7 @@ class ModelService:
         self.lock = asyncio.Lock()
         self.admitted = 0
         self.jobs = set()
+        self.background_remover = None
 
     @property
     def ready(self):
@@ -179,11 +181,20 @@ class ModelService:
             self.select_model(params.model)
             stage = "inference"
             width, height = map(int, params.size.split("x"))
-            with self.torch.inference_mode():
+            # DiffSynth moves quantized parameters during forward and needs version counters.
+            execution_context = (
+                self.torch.no_grad if params.model == MINIMAX_ENTROPACK else self.torch.inference_mode
+            )
+            with execution_context():
                 result = self.render_image(params, image, seed, width, height)
             peak = cuda.max_memory_allocated()
             if result.size != (width, height):
                 raise RuntimeError("Pipeline returned unexpected image dimensions")
+            if getattr(params, "background", None) == "transparent":
+                stage = "background_removal"
+                if self.background_remover is None:
+                    self.background_remover = BackgroundRemover(self.settings.minimax_background_model_path)
+                result = self.background_remover.apply(result)
             stage = "encoding"
             with io.BytesIO() as buffer:
                 result.save(buffer, format="PNG")
