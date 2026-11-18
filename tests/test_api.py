@@ -36,6 +36,7 @@ class FakeModel(ModelService):
         self.started = threading.Event()
         self.release = threading.Event()
         self.calls = []
+        self.reference_sizes = []
 
     def run(self, params, image, seed, request_id):
         self.calls.append(params.prompt)
@@ -52,7 +53,9 @@ class FakeModel(ModelService):
         if params.prompt == "unexpected":
             raise RuntimeError("private path and integration-secret")
         if image is not None:
-            assert image.mode == "RGB"
+            references = image if isinstance(image, list) else [image]
+            assert all(reference.mode == "RGB" for reference in references)
+            self.reference_sizes = [reference.size for reference in references]
         width, height = map(int, params.size.split("x"))
         return ImageResponse(created=int(time.time()), data=[
             ImageData(b64_json=base64.b64encode(make_png((width, height))).decode())
@@ -94,6 +97,48 @@ class APIContractTests(unittest.TestCase):
         self.assertTrue(settings.model_local_files_only)
         self.assertEqual(settings.max_concurrent_inferences, 1)
         self.assertFalse(settings.enable_url_response)
+
+    def test_multiple_references_keep_multipart_order(self):
+        self.settings.minimax_entropack_path = self.temp
+        self.settings.save_uploads = True
+        self.settings.upload_dir = self.temp
+        files = [
+            ("image[]", ("a.png", make_png((32, 48)), "image/png")),
+            ("image[]", ("b.png", make_png((48, 32)), "image/png")),
+        ]
+        response = self.client.post("/v1/images/edits", headers=self.auth,
+                                    data={"prompt": "Combine the scenes", "model": MINIMAX_ENTROPACK},
+                                    files=files)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.app.state.model.reference_sizes, [(32, 48), (48, 32)])
+        request_id = response.headers["X-Request-ID"]
+        self.assertEqual({path.name for path in self.temp.glob("*/*.png")},
+                         {f"{request_id}_1.png", f"{request_id}_2.png"})
+        too_many_pixels = self.client.post("/v1/images/edits", headers=self.auth,
+                                           data={"prompt": "test"}, files=files + files[:1])
+        self.error(too_many_pixels, 400, "invalid_request")
+
+    def test_reference_count_limits_by_model(self):
+        self.settings.minimax_entropack_path = self.temp
+        self.settings.max_image_pixels = 16 * 32 * 32
+        file = ("image[]", ("reference.png", make_png(), "image/png"))
+        for model, maximum in [(self.settings.model_name, 10), (MINIMAX_ENTROPACK, 16)]:
+            data = {"prompt": "test", "model": model}
+            response = self.client.post("/v1/images/edits", headers=self.auth,
+                                        data=data, files=[file] * maximum)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(len(self.app.state.model.reference_sizes), maximum)
+            response = self.client.post("/v1/images/edits", headers=self.auth,
+                                        data=data, files=[file] * (maximum + 1))
+            self.error(response, 400, "invalid_request")
+
+    def test_resize_large_reference_without_resizing_output(self):
+        self.settings.max_reference_edge = 64
+        response = self.edit({"prompt": "test", "size": "1024x1024"}, make_png((256, 128)))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.app.state.model.reference_sizes, [(64, 32)])
+        with Image.open(io.BytesIO(base64.b64decode(response.json()["data"][0]["b64_json"]))) as png:
+            self.assertEqual(png.size, (1024, 1024))
 
     def test_custom_sizes_and_2048_gate(self):
         settings = Settings(_env_file=None, qwen_api_key="integration-secret",
@@ -207,7 +252,8 @@ class APIContractTests(unittest.TestCase):
         self.error(self.edit({"prompt": "edit", "mask": "unsupported"}), 400, "invalid_request")
         self.error(self.edit({"prompt": "edit"}, b"invalid"), 400, "invalid_request")
         self.error(self.edit({"prompt": "edit"}, make_png((65, 65))), 400, "invalid_request")
-        self.error(self.edit({"prompt": "edit"}, b"x" * (1024**2 + 1)), 413, "file_too_large")
+        large_file = make_png() + b"\x00" * (1024**2 + 1)
+        self.assertEqual(self.edit({"prompt": "edit"}, large_file).status_code, 200)
         self.error(self.edit({"prompt": "edit"}, media="image/gif"), 415, "unsupported_media_type")
 
     def test_errors_are_sanitized(self):

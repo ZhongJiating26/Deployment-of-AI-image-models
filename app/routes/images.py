@@ -10,12 +10,18 @@ from starlette.datastructures import UploadFile
 
 from ..config import MINIMAX_ENTROPACK
 from ..exceptions import APIError
-from ..image_utils import decode_image
+from ..image_utils import decode_references
 from ..schemas import ImageRequest, ImageResponse
 
 router = APIRouter(prefix="/v1/images")
 EDIT_SCHEMA = ImageRequest.model_json_schema()
-EDIT_SCHEMA["properties"]["image"] = {"type": "string", "format": "binary"}
+QWEN_MAX_REFERENCE_IMAGES = 10
+MINIMAX_MAX_REFERENCE_IMAGES = 16
+EDIT_SCHEMA["properties"]["image"] = {
+    "type": "array", "items": {"type": "string", "format": "binary"},
+    "minItems": 1, "maxItems": MINIMAX_MAX_REFERENCE_IMAGES,
+    "description": "Up to 10 images for Qwen and 16 for MiniMax.",
+}
 EDIT_SCHEMA["required"].append("image")
 SUPPORTS_PART_LIMIT = "max_part_size" in signature(Request.form).parameters
 
@@ -66,7 +72,7 @@ def content_type(request):
 async def parse_form(request, field_limit):
     try:
         options = {"max_part_size": field_limit} if SUPPORTS_PART_LIMIT else {}
-        form = await request.form(max_files=8, max_fields=16, **options)
+        form = await request.form(max_files=MINIMAX_MAX_REFERENCE_IMAGES + 1, max_fields=16, **options)
     except MultipartParseError as exc:
         raise APIError(400, "invalid_request", "Malformed multipart body") from exc
     try:
@@ -104,24 +110,16 @@ async def edits(request: Request):
     if content_type(request) != "multipart/form-data":
         raise APIError(415, "unsupported_media_type", "Expected multipart/form-data")
     field_limit = max(65536, settings.max_prompt_length * 4)
-    body = await bounded_body(request, settings.max_upload_mb * 1024**2 + field_limit + 65536)
-
-    async def receive():
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    multipart = Request(request.scope, receive)
-    async with parse_form(multipart, field_limit) as form:
+    async with parse_form(request, field_limit) as form:
         values = {}
-        upload = None
+        uploads = []
         for name, value in form.multi_items():
             if isinstance(value, str) and len(value.encode("utf-8")) > field_limit:
                 raise APIError(400, "invalid_request", "Multipart field exceeds the length limit")
             if name in ("image", "image[]"):
-                if upload is not None:
-                    raise APIError(400, "invalid_request", "Only one reference image is supported")
                 if not isinstance(value, UploadFile):
                     raise APIError(422, "validation_error", "Expected an image file")
-                upload = value
+                uploads.append(value)
             elif name in values or name not in ImageRequest.model_fields or isinstance(value, UploadFile):
                 raise APIError(400, "invalid_request", "Duplicate or unsupported multipart field")
             else:
@@ -131,11 +129,13 @@ async def edits(request: Request):
                     except ValueError as exc:
                         raise APIError(422, "validation_error", "Expected integer n or seed") from exc
                 values[name] = value
-        if upload is None:
+        if not uploads:
             raise APIError(422, "validation_error", "Missing image file")
         params = validate_params(values, settings)
+        maximum = MINIMAX_MAX_REFERENCE_IMAGES if params.model == MINIMAX_ENTROPACK else QWEN_MAX_REFERENCE_IMAGES
+        if len(uploads) > maximum:
+            raise APIError(400, "invalid_request", f"At most {maximum} reference images are supported for this model")
         request.app.state.model.require_ready()
-        image = await run_in_threadpool(decode_image, upload, settings, request.state.request_id)
-        if params.model == MINIMAX_ENTROPACK and min(image.size) < 32:
-            raise APIError(400, "invalid_request", "MiniMax reference image sides must be at least 32 pixels")
+        minimum_side = 32 if params.model == MINIMAX_ENTROPACK else 1
+        image = await run_in_threadpool(decode_references, uploads, settings, request.state.request_id, minimum_side)
     return await request.app.state.model.infer(request, params, image)

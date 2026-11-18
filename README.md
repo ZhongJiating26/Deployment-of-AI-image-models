@@ -31,10 +31,10 @@ Turbo 模型自带 8 步采样计划；不要沿用标准版 40 步配置，也�
 | `GET /ready` | 就绪检查 | 模型加载完成、服务可接单时返回 200；否则 503 |
 | `GET /v1/models` | 模型列表 | 需 Bearer API Key |
 | `POST /v1/images/generations` | 文生图 | JSON 请求，`b64_json` 响应 |
-| `POST /v1/images/edits` | 图片编辑 | `multipart/form-data`，首版一张参考图 |
+| `POST /v1/images/edits` | 图片编辑 | `multipart/form-data`，Qwen 最多 10 张、MiniMax 最多 16 张参考图 |
 | `GET /docs` | OpenAPI 调试页 | 仅在 `ENABLE_DOCS=true` 时启用 |
 
-图像接口支持 `n=1`。默认尺寸覆盖 1:1、4:3、3:4、3:2、2:3、16:9、9:16。尺寸列表和默认值按模型配置。Qwen 两个模型单边最多 2048，任一边为 2048 时需打开 `ENABLE_2048`。MiniMax 默认还列出 `2048x2048`、`4096x4096`、`6272x2688` 和 `2688x6272`。未实现 `image URL` 返回、异步任务 ID、mask、多参考图和真正的多 GPU 并发；不应在 `/v1/models` 或接口文档中宣称支持。
+图像接口支持 `n=1`。默认尺寸覆盖 1:1、4:3、3:4、3:2、2:3、16:9、9:16。尺寸列表和默认值按模型配置。Qwen 两个模型单边最多 2048，任一边为 2048 时需打开 `ENABLE_2048`。MiniMax 默认还列出 `2048x2048`、`4096x4096`、`6272x2688` 和 `2688x6272`。未实现 `image URL` 返回、异步任务 ID、mask 和真正的多 GPU 并发。
 
 **接口兼容性说明：** 本项目实现 OpenAI Images API 的常见入参与成功返回结构，不等于完整实现 OpenAI 的所有扩展参数。未知或暂不支持的参数应明确报错，不应静默忽略并造成误解。
 
@@ -164,7 +164,21 @@ Invoke-RestMethod http://127.0.0.1:8000/v1/models -Headers $headers
 
 ### 图片编辑：`POST /v1/images/edits`
 
-请求格式为 `multipart/form-data`，字段：`image`（单张 PNG/JPEG/WebP 文件）、`prompt`、`model`、`size`、`n`、`seed`、`response_format`。当前不支持 `mask`；遇到不支持参数返回明确的 400 错误，而不是忽略。
+请求格式为 `multipart/form-data`，通过重复的 `image` 或 `image[]` 字段上传 PNG/JPEG/WebP 参考图。Qwen 最多 10 张，MiniMax 最多 16 张，服务按上传顺序传给模型。`MAX_IMAGE_PIXELS` 限制单次请求全部参考图的总像素数。`n=1` 表示只生成一张输出图。其他字段包括 `prompt`、`model`、`size`、`seed`、`response_format`。不支持的参数（如 `mask`）返回 400。
+
+应用层不限制图像上传或输出的文件字节数。用户上传的参考图长边超过 `MAX_REFERENCE_EDGE`（默认 2048 像素）时，服务在推理前等比例缩小。参考图总像素上限按缩小后的尺寸累计。生成和编辑的输出保持请求的 `size`。
+
+使用 Python SDK 时，向 `client.images.edit` 传入文件列表即可。示例复用下文的 `client` 配置。
+
+```python
+with open("subject.png", "rb") as subject, open("scene.png", "rb") as scene:
+    result = client.images.edit(
+        model="DiffSynth-Studio/MiniMax-H3-Image-EntroPack",
+        image=[subject, scene],
+        prompt="保留图 1 的人物、服装和姿势，将背景替换成图 2 的街景。",
+        size="1024x1024",
+    )
+```
 
 示例 Python 客户端（同时可用于验收文生图）：
 

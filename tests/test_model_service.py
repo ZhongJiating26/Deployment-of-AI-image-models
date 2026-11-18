@@ -76,7 +76,8 @@ class PipelineAdapterTests(unittest.TestCase):
     def test_minimax_transparent_png(self):
         self.params.model = MINIMAX_ENTROPACK
         self.params.background = "transparent"
-        original = Image.new("RGB", (512, 512))
+        self.params.size = "768x512"
+        original = Image.new("RGB", (768, 512))
         cutout = Image.new("RGBA", original.size, (0, 0, 0, 255))
         cutout.putpixel((0, 0), (0, 0, 0, 0))
         with patch("app.model_service.load_entropack", return_value=Mock(return_value=original)), patch(
@@ -87,6 +88,7 @@ class PipelineAdapterTests(unittest.TestCase):
             remover.return_value.apply.assert_called_once_with(original)
         with Image.open(io.BytesIO(base64.b64decode(result.data[0].b64_json))) as png:
             self.assertEqual(png.mode, "RGBA")
+            self.assertEqual(png.size, (768, 512))
             self.assertEqual(png.getchannel("A").getextrema(), (0, 255))
 
     def test_oom_recovery_and_unavailable_state(self):

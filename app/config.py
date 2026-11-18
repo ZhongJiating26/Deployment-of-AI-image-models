@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     queue_wait_timeout_seconds: float = Field(120, gt=0, allow_inf_nan=False)
     request_timeout_seconds: float = Field(600, gt=0, allow_inf_nan=False)
     max_prompt_length: int = Field(4000, gt=0)
-    max_upload_mb: int = Field(20, gt=0)
+    max_upload_mb: int | None = Field(None, exclude=True)
+    max_reference_edge: int = Field(2048, gt=0)
     max_image_pixels: int = Field(25000000, gt=0)
     allowed_upload_formats: str = "PNG,JPEG,WEBP"
     save_uploads: bool = False
