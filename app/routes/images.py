@@ -68,6 +68,14 @@ def content_type(request):
     return request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
 
 
+def record_image_request(request, values, reference_count):
+    background = "missing"
+    if "background" in values:
+        value = values["background"]
+        background = value if value in ("transparent", "opaque", "auto", None) else "invalid"
+    request.state.metrics.update(background_received=background, reference_count=reference_count)
+
+
 @asynccontextmanager
 async def parse_form(request, field_limit):
     try:
@@ -97,6 +105,7 @@ async def generations(request: Request):
         raise APIError(422, "validation_error", "Invalid JSON body") from exc
     if not isinstance(values, dict):
         raise APIError(422, "validation_error", "Expected a JSON object")
+    record_image_request(request, values, 0)
     return await request.app.state.model.infer(request, validate_params(values, settings))
 
 
@@ -129,6 +138,7 @@ async def edits(request: Request):
                     except ValueError as exc:
                         raise APIError(422, "validation_error", "Expected integer n or seed") from exc
                 values[name] = value
+        record_image_request(request, values, len(uploads))
         if not uploads:
             raise APIError(422, "validation_error", "Missing image file")
         params = validate_params(values, settings)

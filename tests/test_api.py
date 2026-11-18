@@ -246,7 +246,15 @@ class APIContractTests(unittest.TestCase):
         self.error(self.generate(**options), 400, "invalid_request")
         self.settings.minimax_background_model_path = self.temp / "u2net.onnx"
         self.assertEqual(self.generate(**options).status_code, 200)
-        self.assertEqual(self.edit({"prompt": "edit", **options}).status_code, 200)
+        supplied = self.edit({"prompt": "edit", **options})
+        omitted = self.edit({"prompt": "edit", "model": MINIMAX_ENTROPACK})
+        entries = [json.loads(line) for line in (self.temp / "service.log").read_text(encoding="utf-8").splitlines()]
+        for response, background in ((supplied, "transparent"), (omitted, "missing")):
+            self.assertEqual(response.status_code, 200)
+            request_log = next(entry for entry in entries if entry["event"] == "http_request"
+                               and entry["request_id"] == response.headers["X-Request-ID"])
+            self.assertEqual(request_log["background_received"], background)
+            self.assertEqual(request_log["reference_count"], 1)
 
     def test_upload_validation(self):
         self.error(self.edit({"prompt": "edit", "mask": "unsupported"}), 400, "invalid_request")

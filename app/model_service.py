@@ -124,8 +124,8 @@ class ModelService:
         started = perf_counter()
         request_id = request.state.request_id
         seed = params.seed if params.seed is not None else secrets.randbits(64)
-        metrics = {"model": params.model, "size": params.size, "seed": seed, "queue_wait_seconds": 0.0}
-        request.state.metrics = metrics
+        metrics = request.state.metrics
+        metrics.update(model=params.model, size=params.size, seed=seed, queue_wait_seconds=0.0)
         if self.settings.log_prompts:
             metrics["prompt"] = params.prompt
 
